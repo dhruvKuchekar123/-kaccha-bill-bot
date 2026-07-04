@@ -38,6 +38,10 @@ Button tap → acknowledge tap → update khata row (✅ Confirmed / ✏️ Fix 
 Text/sticker → polite "please send a bill photo" reply
 ```
 
+### Workflow Overview
+
+![Complete n8n workflow — router, Gemini extraction, math verification, confirm loop and PDF chain](images/workflow-overview.png)
+
 ## ✨ Key Features
 
 - **One-photo UX** — no app install, no forms, no training needed. If you can use WhatsApp, you can use this.
