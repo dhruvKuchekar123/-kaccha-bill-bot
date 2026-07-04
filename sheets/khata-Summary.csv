@@ -1,0 +1,12 @@
+KHATA SUMMARY,
+,
+Kul Bills,"=COUNTA(Bills!A2:A)"
+Aaj ke Bills,"=SUMPRODUCT((LEFT(Bills!B2:B10000,10)=TEXT(TODAY(),""yyyy-mm-dd""))*1)"
+Aaj ki Bikri (Rs),"=SUMPRODUCT((LEFT(Bills!B2:B10000,10)=TEXT(TODAY(),""yyyy-mm-dd""))*N(Bills!L2:L10000))"
+Is Mahine ki Bikri (Rs),"=SUMPRODUCT((LEFT(Bills!B2:B10000,7)=TEXT(TODAY(),""yyyy-mm""))*N(Bills!L2:L10000))"
+Kul Bikri (Rs),"=SUMPRODUCT(N(Bills!L2:L10000))"
+Kul Baki (Rs),"=SUMPRODUCT(N(Bills!N2:N10000))"
+Confirmed Bills,"=COUNTIF(Bills!P2:P,""✅ Confirmed"")"
+Pending Confirm,"=COUNTIF(Bills!P2:P,""⏳ Pending"")"
+Fix Maange Gaye,"=COUNTIF(Bills!P2:P,""✏️ Fix maanga"")"
+Total Mismatch Bills,"=COUNTIF(Bills!O2:O,""mismatch"")"

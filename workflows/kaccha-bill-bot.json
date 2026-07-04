@@ -1,0 +1,536 @@
+{
+  "name": "Kaccha Bill Bot — Invoice + Khata + Confirm Loop + PDF",
+  "nodes": [
+    {
+      "id": "sticky-overview",
+      "name": "Sticky - Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-460, -520],
+      "parameters": {
+        "width": 460,
+        "height": 320,
+        "color": 4,
+        "content": "## 🧾 Kaccha Bill Bot — Full Loop\n\n**Photo flow:** photo → Gemini (JSON) → Code builds invoice (discount/jama/baki included, math verified in code) → reply with ✅/✏️ buttons → row logged to khata as ⏳ Pending → PDF invoice generated & sent.\n\n**Confirm flow:** user taps button → tap acknowledged → khata row updated (✅ Confirmed / ✏️ Fix maanga) → invoice message edited with status.\n\n**Setup:**\n1. Telegram credential — sab Telegram nodes pe\n2. Gemini credential — Gemini node pe\n3. Google Sheets OAuth — 'Log to Khata' AUR 'Update Khata Status' dono pe, dono mein khata document + Bills sheet select karo\n4. APITemplate.io API key — 'Create PDF' node ke header mein\n\nKhata sheet: sheets/ folder ke dono CSV import karo (tab name 'Bills' zaroori hai)."
+      }
+    },
+    {
+      "id": "sticky-router",
+      "name": "Sticky - Router",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-460, -160],
+      "parameters": {
+        "width": 500,
+        "height": 300,
+        "color": 5,
+        "content": "## 1️⃣ Trigger + Router\n\nTrigger 2 cheezein sunta hai: **message** aur **callback_query** (button taps).\n\n**Kya Aaya?** (Switch):\n- Output 1 'Button' → confirm/fix flow\n- Output 2 'Photo' → bill processing flow\n- Fallback 'Baaki' → text/sticker → photo maango"
+      }
+    },
+    {
+      "id": "sticky-brain",
+      "name": "Sticky - Gemini + Code",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [340, -560],
+      "parameters": {
+        "width": 560,
+        "height": 360,
+        "color": 6,
+        "content": "## 2️⃣ Gemini (JSON) + Code Formatter\n\n**Gemini** returns structured JSON: shop, customer, date, bill no, items, **discount (chhoot/less), paid (jama/advance)**, stated total. Unreadable = \"⚠ confirm\", absent = null.\n\n**Code node** (yahan AI nahi, pakka math):\n- Subtotal = items ka jod\n- Har line: qty × rate ≠ amount → '⚠ check'\n- Expected = Subtotal − Discount; stated se match → ✅ / MISMATCH / unverified\n- Baki = Total − Jama\n- Invoice text + khata row + unique UID banata hai"
+      }
+    },
+    {
+      "id": "sticky-confirm",
+      "name": "Sticky - Confirm Loop",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [340, 260],
+      "parameters": {
+        "width": 640,
+        "height": 300,
+        "color": 3,
+        "content": "## 3️⃣ Confirm Closing Loop\n\nInvoice ke neeche buttons: **✅ Sahi hai** ('ok|UID') / **✏️ Galat hai** ('fix|UID').\n\nTap hone par:\n1. **Answer Button Tap** — spinner band + popup\n2. **Update Khata Status** — UID se row dhundh kar Confirm column update\n3. **Edit Invoice Message** — status line judti hai, buttons hat jaate hain\n\n✏️ pe user dobara saaf photo bhejta hai — naya invoice, naya row."
+      }
+    },
+    {
+      "id": "sticky-pdf",
+      "name": "Sticky - PDF",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1040, 500],
+      "parameters": {
+        "width": 560,
+        "height": 260,
+        "color": 7,
+        "content": "## 4️⃣ PDF Invoice\n\n**Build Invoice HTML** (Code) — invoice ka printable A4 HTML banata hai (shop header, items table, totals, verify status).\n\n**Create PDF** — APITemplate.io ko HTML bhejta hai. Header X-API-KEY mein apni key paste karo (free ~50 PDFs/month).\n\n**Download PDF → Send PDF** — bani hui PDF file user ko document ke roop mein jaati hai.\n\nYeh branch 'Bill Hai?' ke true output se parallel chalti hai — PDF fail ho toh bhi text invoice chala jata hai."
+      }
+    },
+    {
+      "id": "telegram-trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.3,
+      "position": [-420, 40],
+      "webhookId": "kaccha-bill-bot-webhook",
+      "parameters": {
+        "updates": ["message", "callback_query"],
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": { "id": "YOUR_TELEGRAM_CREDENTIAL_ID", "name": "Telegram Bot account" }
+      }
+    },
+    {
+      "id": "router",
+      "name": "Kya Aaya?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [-180, 40],
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "is-callback",
+                    "leftValue": "={{ $json.callback_query?.id }}",
+                    "rightValue": "",
+                    "operator": { "type": "string", "operation": "exists", "singleValue": true }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Button"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "id": "is-photo",
+                    "leftValue": "={{ $json.message?.photo?.last()?.file_id }}",
+                    "rightValue": "",
+                    "operator": { "type": "string", "operation": "exists", "singleValue": true }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "Photo"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "Baaki"
+        }
+      }
+    },
+    {
+      "id": "answer-callback",
+      "name": "Answer Button Tap",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [420, 340],
+      "parameters": {
+        "resource": "callback",
+        "operation": "answerQuery",
+        "queryId": "={{ $json.callback_query.id }}",
+        "additionalFields": {
+          "text": "={{ $json.callback_query.data.startsWith('ok') ? 'Confirm ho gaya ✅' : 'Note kar liya ✏️' }}"
+        }
+      },
+      "credentials": {
+        "telegramApi": { "id": "YOUR_TELEGRAM_CREDENTIAL_ID", "name": "Telegram Bot account" }
+      }
+    },
+    {
+      "id": "update-khata",
+      "name": "Update Khata Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [660, 340],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "update",
+        "authentication": "oAuth2",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["UID"],
+          "value": {
+            "UID": "={{ $('Telegram Trigger').item.json.callback_query.data.split('|')[1] }}",
+            "Confirm": "={{ $('Telegram Trigger').item.json.callback_query.data.startsWith('ok') ? '✅ Confirmed' : '✏️ Fix maanga' }}"
+          },
+          "schema": [
+            { "id": "UID", "displayName": "UID", "required": false, "defaultMatch": true, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Confirm", "displayName": "Confirm", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID", "name": "Google Sheets account" }
+      }
+    },
+    {
+      "id": "edit-invoice",
+      "name": "Edit Invoice Message",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [900, 340],
+      "parameters": {
+        "resource": "message",
+        "operation": "editMessageText",
+        "messageType": "message",
+        "chatId": "={{ $('Telegram Trigger').item.json.callback_query.message.chat.id }}",
+        "messageId": "={{ $('Telegram Trigger').item.json.callback_query.message.message_id }}",
+        "replyMarkup": "none",
+        "text": "={{ $('Telegram Trigger').item.json.callback_query.message.text + '\\n\\n' + ($('Telegram Trigger').item.json.callback_query.data.startsWith('ok') ? '✅ Aapne confirm kar diya — khata mein pakka ho gaya.' : '✏️ Note ho gaya — kripya bill ki dobara saaf photo bhejein, main naya invoice bana dunga.') }}",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": { "id": "YOUR_TELEGRAM_CREDENTIAL_ID", "name": "Telegram Bot account" }
+      }
+    },
+    {
+      "id": "download-photo",
+      "name": "Download Photo",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [140, -60],
+      "parameters": {
+        "resource": "file",
+        "operation": "get",
+        "fileId": "={{ $json.message.photo.last().file_id }}",
+        "download": true,
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": { "id": "YOUR_TELEGRAM_CREDENTIAL_ID", "name": "Telegram Bot account" }
+      }
+    },
+    {
+      "id": "gemini-vision",
+      "name": "Gemini Vision - Bill to JSON",
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [380, -60],
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": { "__rl": true, "mode": "list", "value": "models/gemini-2.5-flash", "cachedResultName": "Gemini 2.5 Flash" },
+        "inputType": "binary",
+        "binaryPropertyName": "data",
+        "simplify": true,
+        "options": { "maxOutputTokens": 2048 },
+        "text": "You are an expert bill digitizer for Indian shopkeepers. The image is a photo of a rough handwritten or printed bill (kaccha bill).\n\nCRITICAL: Reply with ONLY a raw JSON object. No markdown, no code fences, no explanation, no text before or after the JSON.\n\nJSON schema:\n{\n  \"is_bill\": true or false,\n  \"shop\": \"shop/vendor name (letterhead/stamp)\" — string, or \"⚠ confirm\" if visible but unreadable, or null if simply not on the bill,\n  \"customer\": \"customer name (after Naam/Shri/M/s)\" — same rules,\n  \"date\": \"bill date as written\" — same rules,\n  \"bill_no\": \"bill number\" — same rules,\n  \"items\": [ { \"name\": \"item name\", \"qty\": number or null, \"rate\": number or null, \"amount\": number or \"⚠ confirm\" } ],\n  \"discount\": number or null — any chhoot/less/discount/kam kiya amount written on the bill. This is NOT an item; do NOT include discount lines in items,\n  \"paid\": number or null — any jama/advance/paid/diya amount written on the bill. Also NOT an item,\n  \"stated_total\": number — the grand total AS WRITTEN on the bill, or \"⚠ confirm\" if unreadable\n}\n\nRules:\n- NEVER guess unreadable or ambiguous values — use \"⚠ confirm\". Use null ONLY when a field is truly absent. A wrong value is worse than a flagged one.\n- Keep names as written; transliterate Hindi/Devanagari to Roman script (चीनी → Cheeni, शर्मा किराना → Sharma Kirana).\n- Copy numbers exactly as written — do NOT correct or recompute anything. Verification math happens outside this step.\n- If a line shows division or strikethrough (e.g. 2000/2), report the FINAL effective number and put the original in the name, e.g. name: \"Travel expense (2000/2)\", amount: 1000. If genuinely ambiguous, amount: \"⚠ confirm\".\n- All numbers as plain digits — no ₹, no commas, no units inside numbers.\n- If the image is not a bill at all, or too blurry to read anything: reply exactly {\"is_bill\": false}"
+      },
+      "credentials": {
+        "googlePalmApi": { "id": "YOUR_GEMINI_CREDENTIAL_ID", "name": "Google Gemini(PaLM) Api account" }
+      }
+    },
+    {
+      "id": "parse-format",
+      "name": "Parse & Format Invoice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [620, -60],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ---- 1. Gemini raw text nikalo (output shape vary karta hai) ----\nconst j = $json;\nlet raw = '';\nif (j.content && j.content.parts) raw = j.content.parts.map(p => p.text).join('\\n');\nelse if (Array.isArray(j.content)) raw = j.content.map(c => c.text || c).join('\\n');\nelse if (typeof j.content === 'string') raw = j.content;\nelse if (j.text) raw = j.text;\nraw = raw.trim().replace(/^```(json)?/i, '').replace(/```$/, '').trim();\n\nconst msg = $('Telegram Trigger').item.json.message;\nconst chatId = String(msg.chat.id);\nconst userName = [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ');\nconst fail = t => ({ json: { is_bill: false, text: t, chat_id: chatId } });\n\n// ---- 2. JSON parse ----\nlet d;\ntry { d = JSON.parse(raw); } catch (e) { return fail('Sorry! Bill process karne mein dikkat aayi. 🙏 Kripya dobara photo bhejein.'); }\nif (d.is_bill === false) return fail('Sorry! Yeh photo saaf nahi hai ya bill nahi lag rahi. 🙏 Kripya bill ki clear photo bhejein.');\n\n// ---- 3. Deterministic math (AI ke bharose nahi) ----\nconst num = v => (typeof v === 'number' && isFinite(v)) ? v : (typeof v === 'string' && v.trim() !== '' && isFinite(Number(v)) ? Number(v) : null);\nconst show = v => (v === null || v === undefined || v === '') ? '—' : v;\nconst items = d.items || [];\nlet subtotal = 0, anyUnreadable = false;\nconst lines = items.map((it, i) => {\n  const amt = num(it.amount), q = num(it.qty), r = num(it.rate);\n  if (amt === null) anyUnreadable = true; else subtotal += amt;\n  let line = (i + 1) + '. ' + show(it.name);\n  if (q !== null && r !== null) {\n    line += ' — ' + q + ' x ₹' + r + ' = ₹' + (amt === null ? '⚠ confirm' : amt);\n    if (amt !== null && Math.abs(q * r - amt) > 0.01) line += ' ⚠ check';\n  } else {\n    line += ' — ₹' + (amt === null ? '⚠ confirm' : amt);\n  }\n  return line;\n});\n\nconst discount = num(d.discount);\nconst paid = num(d.paid);\nconst stated = num(d.stated_total);\nconst expected = Math.round((subtotal - (discount || 0)) * 100) / 100;\n\nlet verify, verifLine;\nif (anyUnreadable || stated === null) {\n  verify = 'unverified';\n  verifLine = '⚠ Kuch values saaf nahi the, total verify nahi ho paya.';\n} else if (Math.abs(expected - stated) <= 0.01) {\n  verify = 'match';\n  verifLine = '✅ Total sahi hai (items ka jod' + (discount ? ' − chhoot' : '') + ' match karta hai)';\n} else {\n  verify = 'mismatch';\n  verifLine = '⚠ MISMATCH: Bill pe likha ₹' + stated + ', hisaab se banta hai ₹' + expected + ' (farak ₹' + Math.round(Math.abs(stated - expected) * 100) / 100 + '). Kripya check karein.';\n}\nconst balance = (paid !== null && stated !== null) ? Math.round((stated - paid) * 100) / 100 : null;\n\n// ---- 4. Invoice text ----\nconst L = '━━━━━━━━━━━━━━━━━━';\nconst body = ['🧾 DIGITAL INVOICE', L,\n  '🏪 Dukaan: ' + show(d.shop),\n  '👤 Grahak: ' + show(d.customer),\n  '📅 Tareekh: ' + show(d.date),\n  '🔢 Bill No: ' + show(d.bill_no), L,\n  'SAMAAN:', ...lines, L];\nif (discount !== null || paid !== null) body.push('Jod (Subtotal): ₹' + subtotal);\nif (discount !== null) body.push('Chhoot (Discount): − ₹' + discount);\nbody.push('💰 KUL TOTAL: ₹' + (stated === null ? '⚠ confirm' : stated));\nif (paid !== null) body.push('Jama (Paid): ₹' + paid);\nif (balance !== null) body.push('Baki (Balance): ₹' + balance);\nbody.push(verifLine, L);\nlet text = body.join('\\n');\nif (text.includes('⚠')) text += '\\n⚠ wale values saaf nahi the — galat ho toh ✏️ dabayein.';\ntext += '\\n\\nSab sahi hai? Neeche button dabakar batayein 👇';\n\n// ---- 5. Khata row + UID ----\nconst uid = Date.now().toString(36);\nconst ist = new Date(Date.now() + 19800000).toISOString().replace('T', ' ').slice(0, 19);\nreturn { json: {\n  is_bill: true, text: text, uid: uid,\n  timestamp: ist, chat_id: chatId, user: userName,\n  shop: show(d.shop), customer: show(d.customer),\n  bill_date: show(d.date), bill_no: show(d.bill_no),\n  items_json: JSON.stringify(items),\n  subtotal: String(subtotal),\n  discount: discount === null ? '' : String(discount),\n  total: stated === null ? String(d.stated_total || '') : String(stated),\n  paid: paid === null ? '' : String(paid),\n  balance: balance === null ? '' : String(balance),\n  verify: verify, confirm: '⏳ Pending',\n} };"
+      }
+    },
+    {
+      "id": "bill-check",
+      "name": "Bill Hai?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [860, -60],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "is-bill",
+              "leftValue": "={{ $json.is_bill }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "send-invoice",
+      "name": "Send Invoice + Buttons",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1100, -260],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.text }}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  { "text": "✅ Sahi hai", "additionalFields": { "callback_data": "={{ 'ok|' + $json.uid }}" } },
+                  { "text": "✏️ Galat hai", "additionalFields": { "callback_data": "={{ 'fix|' + $json.uid }}" } }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "YOUR_TELEGRAM_CREDENTIAL_ID", "name": "Telegram Bot account" }
+      }
+    },
+    {
+      "id": "log-khata",
+      "name": "Log to Khata",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [1100, -60],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "append",
+        "authentication": "oAuth2",
+        "documentId": { "__rl": true, "mode": "list", "value": "" },
+        "sheetName": { "__rl": true, "mode": "list", "value": "" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "UID": "={{ $json.uid }}",
+            "Timestamp": "={{ $json.timestamp }}",
+            "Chat ID": "={{ $json.chat_id }}",
+            "User": "={{ $json.user }}",
+            "Shop": "={{ $json.shop }}",
+            "Customer": "={{ $json.customer }}",
+            "Bill Date": "={{ $json.bill_date }}",
+            "Bill No": "={{ $json.bill_no }}",
+            "Items": "={{ $json.items_json }}",
+            "Subtotal": "={{ $json.subtotal }}",
+            "Discount": "={{ $json.discount }}",
+            "Total": "={{ $json.total }}",
+            "Paid": "={{ $json.paid }}",
+            "Balance": "={{ $json.balance }}",
+            "Verify": "={{ $json.verify }}",
+            "Confirm": "={{ $json.confirm }}"
+          },
+          "schema": [
+            { "id": "UID", "displayName": "UID", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "Timestamp", "displayName": "Timestamp", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Chat ID", "displayName": "Chat ID", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "User", "displayName": "User", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Shop", "displayName": "Shop", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Customer", "displayName": "Customer", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Bill Date", "displayName": "Bill Date", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Bill No", "displayName": "Bill No", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Items", "displayName": "Items", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Subtotal", "displayName": "Subtotal", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Discount", "displayName": "Discount", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Total", "displayName": "Total", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Paid", "displayName": "Paid", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Balance", "displayName": "Balance", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Verify", "displayName": "Verify", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false },
+            { "id": "Confirm", "displayName": "Confirm", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": false }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID", "name": "Google Sheets account" }
+      }
+    },
+    {
+      "id": "send-error",
+      "name": "Send Error Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1100, 140],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.text }}",
+        "replyMarkup": "none",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "YOUR_TELEGRAM_CREDENTIAL_ID", "name": "Telegram Bot account" }
+      }
+    },
+    {
+      "id": "ask-for-photo",
+      "name": "Ask For Photo",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [140, 140],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.message.chat.id }}",
+        "text": "Namaste! 🙏 Main aapke kacche bill ko digital invoice mein badal deta hoon aur khata bhi rakhta hoon.\n\nBas apne bill ki ek saaf photo bhejein 📸",
+        "replyMarkup": "none",
+        "additionalFields": { "appendAttribution": false }
+      },
+      "credentials": {
+        "telegramApi": { "id": "YOUR_TELEGRAM_CREDENTIAL_ID", "name": "Telegram Bot account" }
+      }
+    },
+    {
+      "id": "build-html",
+      "name": "Build Invoice HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 620],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const d = $json;\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst items = JSON.parse(d.items_json || '[]');\nconst rows = items.map((it, i) => {\n  const q = (it.qty === null || it.qty === undefined) ? '-' : it.qty;\n  const r = (it.rate === null || it.rate === undefined) ? '-' : it.rate;\n  const a = (it.amount === null || it.amount === undefined) ? '-' : it.amount;\n  return '<tr><td>' + (i + 1) + '</td><td>' + esc(it.name) + '</td><td class=\"c\">' + esc(q) + '</td><td class=\"r\">' + esc(r) + '</td><td class=\"r\">' + esc(a) + '</td></tr>';\n}).join('');\n\nlet totals = '';\nif (d.discount !== '' || d.paid !== '') totals += '<tr><td>Jod (Subtotal)</td><td class=\"r\">₹' + esc(d.subtotal) + '</td></tr>';\nif (d.discount !== '') totals += '<tr><td>Chhoot (Discount)</td><td class=\"r\">- ₹' + esc(d.discount) + '</td></tr>';\ntotals += '<tr class=\"big\"><td>Kul Total</td><td class=\"r\">₹' + esc(d.total) + '</td></tr>';\nif (d.paid !== '') totals += '<tr><td>Jama (Paid)</td><td class=\"r\">₹' + esc(d.paid) + '</td></tr>';\nif (d.balance !== '') totals += '<tr class=\"big\"><td>Baki (Balance)</td><td class=\"r\">₹' + esc(d.balance) + '</td></tr>';\n\nlet note = '';\nif (d.verify === 'match') note = '<p class=\"ok\">✓ Total verified — items ka jod match karta hai</p>';\nelse if (d.verify === 'mismatch') note = '<p class=\"warn\">⚠ MISMATCH — bill ka total items ke jod se alag hai. Kripya check karein.</p>';\nelse note = '<p class=\"warn\">⚠ Kuch values saaf nahi the (⚠ confirm) — verify pending.</p>';\n\nconst html = '<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>' +\n  'body{font-family:Helvetica,Arial,sans-serif;color:#222;margin:32px;font-size:13px}' +\n  'h1{font-size:20px;margin:0}' +\n  '.head{border-bottom:2px solid #222;padding-bottom:8px;margin-bottom:12px}' +\n  '.meta{width:100%;margin-bottom:14px}.meta td{padding:2px 0}' +\n  'table.items{width:100%;border-collapse:collapse;margin-bottom:14px}' +\n  'table.items th{background:#f0efe8;text-align:left;padding:6px;border:1px solid #ccc}' +\n  'table.items td{padding:6px;border:1px solid #ccc}' +\n  '.c{text-align:center}.r{text-align:right}' +\n  'table.tot{width:45%;margin-left:auto;border-collapse:collapse}table.tot td{padding:4px 6px}' +\n  '.big td{font-weight:bold;font-size:15px;border-top:1px solid #222}' +\n  '.ok{color:#1a7a1a}.warn{color:#b00020;font-weight:bold}' +\n  '.foot{margin-top:24px;font-size:11px;color:#777;border-top:1px solid #ccc;padding-top:6px}' +\n  '</style></head><body>' +\n  '<div class=\"head\"><h1>' + esc(d.shop === '—' ? 'Digital Invoice' : d.shop) + '</h1><div>Digital Invoice</div></div>' +\n  '<table class=\"meta\"><tr><td><b>Grahak:</b> ' + esc(d.customer) + '</td><td><b>Bill No:</b> ' + esc(d.bill_no) + '</td></tr>' +\n  '<tr><td><b>Tareekh:</b> ' + esc(d.bill_date) + '</td><td><b>Generated:</b> ' + esc(d.timestamp) + '</td></tr></table>' +\n  '<table class=\"items\"><tr><th>#</th><th>Samaan</th><th>Qty</th><th>Rate (₹)</th><th>Amount (₹)</th></tr>' + rows + '</table>' +\n  '<table class=\"tot\">' + totals + '</table>' + note +\n  '<div class=\"foot\">Yeh invoice kacche bill ki photo se automatically banaya gaya hai · UID: ' + esc(d.uid) + '</div>' +\n  '</body></html>';\n\nreturn { json: Object.assign({}, d, { html: html }) };"
+      }
+    },
+    {
+      "id": "create-pdf",
+      "name": "Create PDF (APITemplate)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 620],
+      "parameters": {
+        "method": "POST",
+        "url": "https://rest.apitemplate.io/v2/create-pdf-from-html",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-KEY", "value": "PASTE_YOUR_APITEMPLATE_API_KEY_HERE" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ body: $json.html, settings: { paper_size: 'A4', orientation: '1' } }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "download-pdf",
+      "name": "Download PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1580, 620],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.download_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "send-pdf",
+      "name": "Send PDF",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1820, 620],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendDocument",
+        "chatId": "={{ $('Build Invoice HTML').item.json.chat_id }}",
+        "binaryData": true,
+        "binaryPropertyName": "data",
+        "replyMarkup": "none",
+        "additionalFields": {
+          "fileName": "={{ 'Invoice-' + ($('Build Invoice HTML').item.json.bill_no !== '—' ? $('Build Invoice HTML').item.json.bill_no : $('Build Invoice HTML').item.json.uid) + '.pdf' }}",
+          "caption": "📄 Aapka invoice PDF — print ya share kar sakte hain"
+        }
+      },
+      "credentials": {
+        "telegramApi": { "id": "YOUR_TELEGRAM_CREDENTIAL_ID", "name": "Telegram Bot account" }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [ { "node": "Kya Aaya?", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Kya Aaya?": {
+      "main": [
+        [ { "node": "Answer Button Tap", "type": "main", "index": 0 } ],
+        [ { "node": "Download Photo", "type": "main", "index": 0 } ],
+        [ { "node": "Ask For Photo", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Answer Button Tap": {
+      "main": [
+        [ { "node": "Update Khata Status", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Update Khata Status": {
+      "main": [
+        [ { "node": "Edit Invoice Message", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Download Photo": {
+      "main": [
+        [ { "node": "Gemini Vision - Bill to JSON", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Gemini Vision - Bill to JSON": {
+      "main": [
+        [ { "node": "Parse & Format Invoice", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Parse & Format Invoice": {
+      "main": [
+        [ { "node": "Bill Hai?", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Bill Hai?": {
+      "main": [
+        [
+          { "node": "Send Invoice + Buttons", "type": "main", "index": 0 },
+          { "node": "Log to Khata", "type": "main", "index": 0 },
+          { "node": "Build Invoice HTML", "type": "main", "index": 0 }
+        ],
+        [ { "node": "Send Error Reply", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Build Invoice HTML": {
+      "main": [
+        [ { "node": "Create PDF (APITemplate)", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Create PDF (APITemplate)": {
+      "main": [
+        [ { "node": "Download PDF", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Download PDF": {
+      "main": [
+        [ { "node": "Send PDF", "type": "main", "index": 0 } ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
